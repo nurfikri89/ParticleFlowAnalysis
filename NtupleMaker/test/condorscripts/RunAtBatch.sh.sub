@@ -1,0 +1,27 @@
+executable    = RunAtBatch.sh
+universe      = vanilla
+output        = BatchLog/CMSRun.$(SAMPLE_NAME).$(FILE_NUM).$(ClusterId).$(ProcId).out
+error         = BatchLog/CMSRun.$(SAMPLE_NAME).$(FILE_NUM).$(ClusterId).$(ProcId).err
+log           = BatchLog/CMSRun.$(ClusterId).log
+stream_output = True
+stream_error  = True
+
+#getenv = true
+environment = "HOME=$ENV(HOME) JOBWORKDIR=$ENV(PWD)"
+
+#+JobFlavour   = "espresso"
+#+JobFlavour   = "microcentury"
++JobFlavour   = "longlunch"
+#+JobFlavour   = "workday"
+
+arguments = $(SAMPLE_NAME) $(FILE_NUM)
+
+plusone = $(ProcId) + 1 + $(OFFSETFILENUM)
+FILE_NUM = $INT(plusone,%d)
+queue $(NRUNS)
+
+#queue SAMPLE_NAME FILE_NUM from (
+#SinglePionMinus_E-50_Eta-2p5to3p0 151
+#SinglePhoton_E-50_Eta-2p5to3p0 29
+#SinglePhoton_E-50_Eta-2p5to3p0 142
+#)
