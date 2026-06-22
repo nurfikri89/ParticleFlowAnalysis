@@ -14,6 +14,8 @@ def AddParticleFlowAnalysisNtuplizer(process):
         dRMaxGenPartToPFCandNeuHad = cms.untracked.double(0.4),
         dRMaxGenPartToPFCandPhoton = cms.untracked.double(0.4),
         #
+        saveAllPFCands = cms.untracked.bool(False),
+        #
         PFClustersECAL = cms.InputTag("particleFlowClusterECAL"),
         PFClustersPS   = cms.InputTag("particleFlowClusterPS"),
         PFClustersHCAL = cms.InputTag("particleFlowClusterHCAL"),
@@ -25,6 +27,8 @@ def AddParticleFlowAnalysisNtuplizer(process):
         PFRecHitsPS  = cms.InputTag("particleFlowRecHitPS"),
         PFRecHitsHBHE = cms.InputTag("particleFlowRecHitHBHE"),
         PFRecHitsHF = cms.InputTag("particleFlowRecHitHF"),
+        saveOnlyNearbyPFRecHits = cms.untracked.bool(False),
+        dRNearbyPFRecHits = cms.untracked.double(0.8),
         #
         g4SimHitsPCaloHitsEB   = cms.InputTag("g4SimHits","EcalHitsEB"),
         g4SimHitsPCaloHitsEE   = cms.InputTag("g4SimHits","EcalHitsEE"),

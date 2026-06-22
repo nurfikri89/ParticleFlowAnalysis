@@ -2,6 +2,7 @@
 #include "FWCore/ServiceRegistry/interface/Service.h"
 
 #include "ParticleFlowAnalysis/NtupleMaker/plugins/ParticleFlowAnalysisNtuplizer.h"
+#include "ParticleFlowAnalysis/NtupleMaker/include/SimHitInfo.h"
 
 #include "FWCore/Framework/interface/ESHandle.h"
 
@@ -18,22 +19,6 @@
 using namespace std;
 using namespace edm;
 using namespace reco;
-
-struct SimHitInfo {
-  float energy;
-  float energyEM;
-  float energyHAD;
-  int nCaloHits;
-  float energy_25ns;
-  float energyEM_25ns;
-  float energyHAD_25ns;
-  int nCaloHits_25ns;
-
-  SimHitInfo(){
-    energy=0; energyHAD=0; energyEM=0; nCaloHits=0;
-    energy_25ns=0; energyHAD_25ns=0; energyEM_25ns=0; nCaloHits_25ns=0;
-  }
-};
 
 ParticleFlowAnalysisNtuplizer::ParticleFlowAnalysisNtuplizer(const edm::ParameterSet& iConfig) {
 
@@ -82,9 +67,14 @@ ParticleFlowAnalysisNtuplizer::ParticleFlowAnalysisNtuplizer(const edm::Paramete
   dRMaxGenPartToPFCandNeuHad_ = iConfig.getUntrackedParameter<double>("dRMaxGenPartToPFCandNeuHad",0.4);
   dRMaxGenPartToPFCandPhoton_ = iConfig.getUntrackedParameter<double>("dRMaxGenPartToPFCandPhoton",0.4);
 
+  saveAllPFCands_ = iConfig.getUntrackedParameter<bool>("saveAllPFCands",false);
+
   savePFClustersECAL_ = iConfig.getUntrackedParameter<bool>("savePFClustersECAL",false);
   savePFClustersPS_ = iConfig.getUntrackedParameter<bool>("savePFClustersPS",false);
   savePFClustersHCAL_ = iConfig.getUntrackedParameter<bool>("savePFClustersHCAL",false);
+
+  saveOnlyNearbyPFRecHits_ = iConfig.getUntrackedParameter<bool>("saveOnlyNearbyPFRecHits",false);
+  dRNearbyPFRecHits_ = iConfig.getUntrackedParameter<double>("dRNearbyPFRecHits",0.6);
 
   saveSimCaloHitHBHE_ = iConfig.getUntrackedParameter<bool>("saveSimCaloHitHBHE",false);
   saveSimCaloHitEB_ = iConfig.getUntrackedParameter<bool>("saveSimCaloHitEB",false);
@@ -93,6 +83,44 @@ ParticleFlowAnalysisNtuplizer::ParticleFlowAnalysisNtuplizer(const edm::Paramete
   saveSimHitEB_ = iConfig.getUntrackedParameter<bool>("saveSimHitEB",false);
   saveSimHitEE_ = iConfig.getUntrackedParameter<bool>("saveSimHitEE",false);
 
+  input_simtrack_token_ = consumes<edm::SimTrackContainer>(edm::InputTag("g4SimHits"));
+  input_simvertex_token_ = consumes<edm::SimVertexContainer>(edm::InputTag("g4SimHits"));
+
+  /*
+  mahi_dynamicPed_ = iConfig.getParameter<bool>("mahi_dynamicPed");
+  mahi_ts4Thresh_ = iConfig.getParameter<double>("mahi_ts4Thresh");
+  mahi_chiSqSwitch_ = iConfig.getParameter<double>("mahi_chiSqSwitch");
+  mahi_applyTimeSlew_ = iConfig.getParameter<bool>("mahi_applyTimeSlew");
+  mahi_calculateArrivalTime_ = iConfig.getParameter<bool>("mahi_calculateArrivalTime");
+  mahi_timeAlgo_ = iConfig.getParameter<int>("mahi_timeAlgo");
+  mahi_thEnergeticPulses_ = iConfig.getParameter<double>("mahi_thEnergeticPulses");
+  mahi_meanTime_ = iConfig.getParameter<double>("mahi_meanTime");
+  mahi_timeSigmaHPD_ = iConfig.getParameter<double>("mahi_timeSigmaHPD");
+  mahi_timeSigmaSiPM_ = iConfig.getParameter<double>("mahi_timeSigmaSiPM");
+  mahi_activeBXs_ = iConfig.getParameter<std::vector<int>>("mahi_activeBXs");
+  mahi_nMaxItersMin_ = iConfig.getParameter<int>("mahi_nMaxItersMin");
+  mahi_nMaxItersNNLS_ = iConfig.getParameter<int>("mahi_nMaxItersNNLS");
+  mahi_deltaChiSqThresh_ = iConfig.getParameter<double>("mahi_deltaChiSqThresh");
+  mahi_nnlsThresh_ = iConfig.getParameter<double>("mahi_nnlsThresh");
+
+  mahi_ = std::make_unique<MahiFit>();
+  mahi_->setParameters(mahi_dynamicPed_,
+                       mahi_ts4Thresh_,
+                       mahi_chiSqSwitch_,
+                       mahi_applyTimeSlew_,
+                       HcalTimeSlew::Medium,
+                       mahi_calculateArrivalTime_,
+                       mahi_timeAlgo_,
+                       mahi_thEnergeticPulses_,
+                       mahi_meanTime_,
+                       mahi_timeSigmaHPD_,
+                       mahi_timeSigmaSiPM_,
+                       mahi_activeBXs_,
+                       mahi_nMaxItersMin_,
+                       mahi_nMaxItersNNLS_,
+                       mahi_deltaChiSqThresh_,
+                       mahi_nnlsThresh_);
+  */
   //
   //
   //
@@ -170,6 +198,22 @@ ParticleFlowAnalysisNtuplizer::ParticleFlowAnalysisNtuplizer(const edm::Paramete
   tree->Branch("genPart_extrapolated_pointHCAL_z",&genPart_extrapolated_pointHCAL_z);
   tree->Branch("genPart_extrapolated_pointHCAL_eta",&genPart_extrapolated_pointHCAL_eta);
   tree->Branch("genPart_extrapolated_pointHCAL_phi",&genPart_extrapolated_pointHCAL_phi);
+
+  tree->Branch("genPart_CloseByPFCand_OriginalIdx", &genPart_CloseByPFCand_OriginalIdx);
+  tree->Branch("genPart_CloseByPFCand_ChgHad_OriginalIdx", &genPart_CloseByPFCand_ChgHad_OriginalIdx);
+  tree->Branch("genPart_CloseByPFCand_NeuHad_OriginalIdx", &genPart_CloseByPFCand_NeuHad_OriginalIdx);
+  tree->Branch("genPart_CloseByPFCand_Photon_OriginalIdx", &genPart_CloseByPFCand_Photon_OriginalIdx);
+
+  if (saveAllPFCands_){
+    tree->Branch("nAllPFCand",&nAllPFCand);
+    tree->Branch("AllPFCand_pt",&AllPFCand_pt);
+    tree->Branch("AllPFCand_eta",&AllPFCand_eta);
+    tree->Branch("AllPFCand_phi",&AllPFCand_phi);
+    tree->Branch("AllPFCand_mass",&AllPFCand_mass);
+    tree->Branch("AllPFCand_energy",&AllPFCand_energy);
+    tree->Branch("AllPFCand_pdgId",&AllPFCand_pdgId);
+    tree->Branch("AllPFCand_birthId",&AllPFCand_birthId);
+  }
 
   tree->Branch("nPFCand",&nPFCand);
   tree->Branch("PFCand_pt",&PFCand_pt);
@@ -366,6 +410,9 @@ ParticleFlowAnalysisNtuplizer::ParticleFlowAnalysisNtuplizer(const edm::Paramete
     tree->Branch("SimHitHBHE_energyEM",&SimHitHBHE_energyEM);
     tree->Branch("SimHitHBHE_energyHAD",&SimHitHBHE_energyHAD);
     tree->Branch("SimHitHBHE_samplingFactor",&SimHitHBHE_samplingFactor);
+    tree->Branch("SimHitHBHE_fCtoGeV",&SimHitHBHE_fCtoGeV);
+    tree->Branch("SimHitHBHE_photoelectronsToAnalog",&SimHitHBHE_photoelectronsToAnalog);
+    tree->Branch("SimHitHBHE_simHitToPhotoelectrons",&SimHitHBHE_simHitToPhotoelectrons);
     tree->Branch("SimHitHBHE_nCaloHits",&SimHitHBHE_nCaloHits);
     tree->Branch("SimHitHBHE_ieta",&SimHitHBHE_ieta);
     tree->Branch("SimHitHBHE_iphi",&SimHitHBHE_iphi);
@@ -377,6 +424,15 @@ ParticleFlowAnalysisNtuplizer::ParticleFlowAnalysisNtuplizer(const edm::Paramete
     tree->Branch("SimHitHBHE_energy_25ns",&SimHitHBHE_energy_25ns);
     tree->Branch("SimHitHBHE_energyEM_25ns",&SimHitHBHE_energyEM_25ns);
     tree->Branch("SimHitHBHE_energyHAD_25ns",&SimHitHBHE_energyHAD_25ns);
+    tree->Branch("SimHitHBHE_energy_50ns",&SimHitHBHE_energy_50ns);
+    tree->Branch("SimHitHBHE_energyEM_50ns",&SimHitHBHE_energyEM_50ns);
+    tree->Branch("SimHitHBHE_energyHAD_50ns",&SimHitHBHE_energyHAD_50ns);
+    tree->Branch("SimHitHBHE_energy_75ns",&SimHitHBHE_energy_75ns);
+    tree->Branch("SimHitHBHE_energyEM_75ns",&SimHitHBHE_energyEM_75ns);
+    tree->Branch("SimHitHBHE_energyHAD_75ns",&SimHitHBHE_energyHAD_75ns);
+    tree->Branch("SimHitHBHE_energy_100ns",&SimHitHBHE_energy_100ns);
+    tree->Branch("SimHitHBHE_energyEM_100ns",&SimHitHBHE_energyEM_100ns);
+    tree->Branch("SimHitHBHE_energyHAD_100ns",&SimHitHBHE_energyHAD_100ns);
   }
   if (saveSimHitEB_){
     tree->Branch("nSimHitEB",&nSimHitEB,"nSimHitEB/I");
@@ -540,9 +596,24 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
   genPart_extrapolated_pointHCAL_eta = 0.f;
   genPart_extrapolated_pointHCAL_phi = 0.f;
 
+  genPart_CloseByPFCand_OriginalIdx.clear();
+  genPart_CloseByPFCand_ChgHad_OriginalIdx.clear();
+  genPart_CloseByPFCand_NeuHad_OriginalIdx.clear();
+  genPart_CloseByPFCand_Photon_OriginalIdx.clear();
+
   genVertex_x = 0.f;
   genVertex_y = 0.f;
   genVertex_z = 0.f;
+
+
+  nAllPFCand = 0;
+  AllPFCand_pt.clear();
+  AllPFCand_eta.clear();
+  AllPFCand_phi.clear();
+  AllPFCand_mass.clear();
+  AllPFCand_energy.clear();
+  AllPFCand_pdgId.clear();
+  AllPFCand_birthId.clear();
 
   nPFCand = 0;
   PFCand_pt.clear();
@@ -665,6 +736,7 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
   PFRecHitHBHE_cutThreshold.clear();
   PFRecHitHBHE_hcalRespCorr.clear();
   PFRecHitHBHE_detId.clear();
+  PFRecHitHBHE_HBHEChannelInfoIdx.clear();
 
   nPFRecHitHF = 0;
   PFRecHitHF_energy.clear();
@@ -742,6 +814,9 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
   SimHitHBHE_energyEM.clear();
   SimHitHBHE_energyHAD.clear();
   SimHitHBHE_samplingFactor.clear();
+  SimHitHBHE_fCtoGeV.clear();
+  SimHitHBHE_photoelectronsToAnalog.clear();
+  SimHitHBHE_simHitToPhotoelectrons.clear();
   SimHitHBHE_nCaloHits.clear();
   SimHitHBHE_ieta.clear();
   SimHitHBHE_iphi.clear();
@@ -754,6 +829,22 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
   SimHitHBHE_energyEM_25ns.clear();
   SimHitHBHE_energyHAD_25ns.clear();
   SimHitHBHE_nCaloHits_25ns.clear();
+  SimHitHBHE_energy_50ns.clear();
+  SimHitHBHE_energyEM_50ns.clear();
+  SimHitHBHE_energyHAD_50ns.clear();
+  SimHitHBHE_nCaloHits_50ns.clear();
+  SimHitHBHE_energy_75ns.clear();
+  SimHitHBHE_energyEM_75ns.clear();
+  SimHitHBHE_energyHAD_75ns.clear();
+  SimHitHBHE_nCaloHits_75ns.clear();
+  SimHitHBHE_energy_100ns.clear();
+  SimHitHBHE_energyEM_100ns.clear();
+  SimHitHBHE_energyHAD_100ns.clear();
+  SimHitHBHE_nCaloHits_100ns.clear();
+  SimHitHBHE_energy_200ns.clear();
+  SimHitHBHE_energyEM_200ns.clear();
+  SimHitHBHE_energyHAD_200ns.clear();
+  SimHitHBHE_nCaloHits_200ns.clear();
 
   nSimHitEB = 0;
   SimHitEB_energy.clear();
@@ -820,6 +911,49 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
   PFClusterHCAL_hits_fraction.clear();
   PFClusterHCAL_hits_PFRecHitHBHE_Idx.clear();
   PFClusterHCAL_key.clear();
+
+  /*
+  nHBHEChannelInfo=0;
+
+  HBHEChannelInfo_ieta.clear();
+  HBHEChannelInfo_iphi.clear();
+  HBHEChannelInfo_depth.clear();
+  HBHEChannelInfo_fcByPE.clear();
+  HBHEChannelInfo_lambda.clear();
+  HBHEChannelInfo_noisecorr.clear();
+  HBHEChannelInfo_tsRawCharge.clear();
+  HBHEChannelInfo_tsPedestal.clear();
+  HBHEChannelInfo_tsDFcPerADC.clear();
+
+  HBHEChannelInfo_mahi_nSamples.clear();
+  HBHEChannelInfo_mahi_soi.clear();
+  HBHEChannelInfo_mahi_inTimeConst.clear();
+  HBHEChannelInfo_mahi_inDarkCurrent.clear();
+  HBHEChannelInfo_mahi_inPedAvg.clear();
+  HBHEChannelInfo_mahi_inGain.clear();
+  HBHEChannelInfo_mahi_use8.clear();
+  HBHEChannelInfo_mahi_chiSq.clear();
+  HBHEChannelInfo_mahi_arrivalTime.clear();
+  HBHEChannelInfo_mahi_mahiEnergy.clear();
+  HBHEChannelInfo_mahi_ootEnergy0.clear();
+  HBHEChannelInfo_mahi_ootEnergy1.clear();
+  HBHEChannelInfo_mahi_ootEnergy2.clear();
+  HBHEChannelInfo_mahi_ootEnergy3.clear();
+  HBHEChannelInfo_mahi_ootEnergy4.clear();
+  HBHEChannelInfo_mahi_ootEnergy5.clear();
+  HBHEChannelInfo_mahi_ootEnergy6.clear();
+  HBHEChannelInfo_mahi_pedEnergy.clear();
+  HBHEChannelInfo_mahi_count.clear();
+  HBHEChannelInfo_mahi_inputTS.clear();
+  HBHEChannelInfo_mahi_inputTDC.clear();
+  HBHEChannelInfo_mahi_itPulse.clear();
+  HBHEChannelInfo_mahi_inNoiseADC.clear();
+  HBHEChannelInfo_mahi_inNoiseDC.clear();
+  HBHEChannelInfo_mahi_inNoisePhoto.clear();
+  HBHEChannelInfo_mahi_inPedestal.clear();
+  HBHEChannelInfo_mahi_totalUCNoise.clear();
+  HBHEChannelInfo_mahi_ootPulse.clear();
+  */
 
   const HepPDT::ParticleDataTable* pdt = &iSetup.getData(pdtToken_);
   const MagneticField* bField = &iSetup.getData(magneticFieldToken_);
@@ -1004,18 +1138,41 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
   //
   // Save in vector of pairs where the first value is the dR2 between PFCandidate and genPart
   //
+
+  std::vector<std::pair<float, size_t>> pfCand_All_Idx;
   std::vector<std::pair<float, size_t>> pfCand_Selected_Idx;
+  std::vector<std::pair<float, size_t>> pfCand_Selected_ChgHad_Idx;
+  std::vector<std::pair<float, size_t>> pfCand_Selected_NeuHad_Idx;
+  std::vector<std::pair<float, size_t>> pfCand_Selected_Photon_Idx;
+
+  nAllPFCand = n_pfCandidates;
 
   for (size_t icand = 0; icand < n_pfCandidates; ++icand){
     const reco::PFCandidate& pfCand = pfCandidates.at(icand);
     float dR2 = reco::deltaR2(genPart.eta(), genPart.phi(), pfCand.eta(), pfCand.phi());
 
-    bool isChgHad = fabs(pfCand.pdgId()) == 211 && dR2 <= (dRMaxGenPartToPFCandChgHad_*dRMaxGenPartToPFCandChgHad_);
-    bool isNeuHad = pfCand.pdgId() == 130 && dR2 <= (dRMaxGenPartToPFCandNeuHad_*dRMaxGenPartToPFCandNeuHad_);
-    bool isPhoton = pfCand.pdgId() == 22 && dR2 <= (dRMaxGenPartToPFCandPhoton_*dRMaxGenPartToPFCandPhoton_);
+    bool isChgHad = fabs(pfCand.pdgId()) == 211 && dR2 <= (dRMaxGenPartToPFCandChgHad_ * dRMaxGenPartToPFCandChgHad_);
+    bool isNeuHad = pfCand.pdgId() == 130       && dR2 <= (dRMaxGenPartToPFCandNeuHad_ * dRMaxGenPartToPFCandNeuHad_);
+    bool isPhoton = pfCand.pdgId() == 22        && dR2 <= (dRMaxGenPartToPFCandPhoton_ * dRMaxGenPartToPFCandPhoton_);
 
+    pfCand_All_Idx.push_back(make_pair(dR2, icand));
     if (isChgHad || isNeuHad || isPhoton){
       pfCand_Selected_Idx.push_back(make_pair(dR2, icand));
+      if(isChgHad) pfCand_Selected_ChgHad_Idx.push_back(make_pair(dR2, icand));
+      if(isNeuHad) pfCand_Selected_NeuHad_Idx.push_back(make_pair(dR2, icand));
+      if(isPhoton) pfCand_Selected_Photon_Idx.push_back(make_pair(dR2, icand));
+    }
+
+    if (saveAllPFCands_){
+      AllPFCand_pt.push_back(pfCand.pt());
+      AllPFCand_eta.push_back(pfCand.eta());
+      AllPFCand_phi.push_back(pfCand.phi());
+      AllPFCand_mass.push_back(pfCand.mass());
+      AllPFCand_energy.push_back(pfCand.energy());
+      AllPFCand_pdgId.push_back(pfCand.pdgId());
+      unsigned birthId = 0;
+      birthId = pfCand.getRecoLocationIdx();
+      AllPFCand_birthId.push_back(birthId);
     }
   }
 
@@ -1025,7 +1182,29 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
   auto dR2Comparator = [](const std::pair<float, size_t> lhs, const std::pair<float, size_t> rhs){
     return lhs.first < rhs.first;
   };
-  std::stable_sort(pfCand_Selected_Idx.begin(), pfCand_Selected_Idx.end(), dR2Comparator);
+  std::stable_sort(pfCand_Selected_Idx.begin(),        pfCand_Selected_Idx.end(),        dR2Comparator);
+  std::stable_sort(pfCand_Selected_ChgHad_Idx.begin(), pfCand_Selected_ChgHad_Idx.end(), dR2Comparator);
+  std::stable_sort(pfCand_Selected_NeuHad_Idx.begin(), pfCand_Selected_NeuHad_Idx.end(), dR2Comparator);
+  std::stable_sort(pfCand_Selected_Photon_Idx.begin(), pfCand_Selected_Photon_Idx.end(), dR2Comparator);
+
+  //
+  // Save the index to the original full PF candidate collection
+  //
+  for(size_t icandsel=0 ; icandsel < pfCand_Selected_Idx.size(); icandsel++){
+    genPart_CloseByPFCand_OriginalIdx.push_back(pfCand_Selected_Idx[icandsel].second);
+  }
+
+  for(size_t icandsel=0 ; icandsel < pfCand_Selected_ChgHad_Idx.size(); icandsel++){
+    genPart_CloseByPFCand_ChgHad_OriginalIdx.push_back(pfCand_Selected_ChgHad_Idx[icandsel].second);
+  }
+
+  for(size_t icandsel=0 ; icandsel < pfCand_Selected_NeuHad_Idx.size(); icandsel++){
+    genPart_CloseByPFCand_NeuHad_OriginalIdx.push_back(pfCand_Selected_NeuHad_Idx[icandsel].second);
+  }
+
+  for(size_t icandsel=0 ; icandsel < pfCand_Selected_Photon_Idx.size(); icandsel++){
+    genPart_CloseByPFCand_Photon_OriginalIdx.push_back(pfCand_Selected_Photon_Idx[icandsel].second);
+  }
 
   //==========================================
   //
@@ -1052,10 +1231,9 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
   // std::vector<std::vector<unsigned int>> PFCand_PFElementGSFInBlock_keys;
   // std::vector<std::vector<unsigned int>> PFCand_PFElementBREMInBlock_keys;
 
-  for(size_t icandsel=0 ; icandsel < pfCand_Selected_Idx.size(); icandsel++){
-    const reco::PFCandidate& pfCand = pfCandidates.at(pfCand_Selected_Idx[icandsel].second);
-    reco::PFCandidateRef pfCandRef(pfCandidatesHandle,pfCand_Selected_Idx[icandsel].second);
-
+  for(size_t icand=0 ; icand < pfCand_Selected_Idx.size(); icand++){
+    const reco::PFCandidate& pfCand = pfCandidates.at(pfCand_Selected_Idx[icand].second);
+    reco::PFCandidateRef pfCandRef(pfCandidatesHandle,pfCand_Selected_Idx[icand].second);
 
     PFCand_pt.push_back(pfCand.pt());
     PFCand_eta.push_back(pfCand.eta());
@@ -1066,7 +1244,9 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
     unsigned birthId = 0;
     birthId = pfCand.getRecoLocationIdx();
     PFCand_birthId.push_back(birthId);
-    PFCand_dRToGenPart.push_back(TMath::Sqrt(pfCand_Selected_Idx[icandsel].first));
+
+    float dR2 = reco::deltaR2(genPart.eta(), genPart.phi(), pfCand.eta(), pfCand.phi());
+    PFCand_dRToGenPart.push_back(TMath::Sqrt(dR2));
 
     bool isChgHadIso = false;
     if (fabs(pfCand.pdgId()) == 211){
@@ -1075,16 +1255,16 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
     PFCand_isChgHadIso.push_back(int(isChgHadIso));
 
     if(Idx_ClosestPFCandChgHad == -1 && fabs(pfCand.pdgId()) == 211){
-      Idx_ClosestPFCandChgHad = icandsel;
+      Idx_ClosestPFCandChgHad = icand;
     }
     if(Idx_ClosestPFCandChgHadIso == -1 && fabs(pfCand.pdgId()) == 211 && isChgHadIso){
-      Idx_ClosestPFCandChgHadIso = icandsel;
+      Idx_ClosestPFCandChgHadIso = icand;
     }
     if(Idx_ClosestPFCandNeuHad == -1 && pfCand.pdgId() == 130){
-      Idx_ClosestPFCandNeuHad = icandsel;
+      Idx_ClosestPFCandNeuHad = icand;
     }
     if(Idx_ClosestPFCandPhoton == -1 && pfCand.pdgId() == 22){
-      Idx_ClosestPFCandPhoton = icandsel;
+      Idx_ClosestPFCandPhoton = icand;
     }
 
 
@@ -1524,6 +1704,12 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
     HcalDetId theHcalDetId(pfrechit.detId());
     double eta = cellGeometryHB->getPosition(theHcalDetId).eta();
     double phi = cellGeometryHB->getPosition(theHcalDetId).phi();
+
+    if (saveOnlyNearbyPFRecHits_){
+      float dR2 = reco::deltaR2(genPart.eta(), genPart.phi(), eta, phi);
+      if (dR2 > (dRNearbyPFRecHits_*dRNearbyPFRecHits_)) continue;
+    }
+
     PFRecHitHBHE_energy.push_back(pfrechit.energy());
     PFRecHitHBHE_ieta.push_back(theHcalDetId.ieta());
     PFRecHitHBHE_iphi.push_back(theHcalDetId.iphi());
@@ -1552,14 +1738,144 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
 
   //==========================================
   //
+  // Digi information and MAHI output
+  // NOTE: Still in development
+  //
+  //==========================================
+  /*
+  HBHEChannelInfo_tsRawCharge(8,std::vector<float>());
+  HBHEChannelInfo_tsPedestal(8,std::vector<float>());
+  HBHEChannelInfo_tsDFcPerADC(8,std::vector<float>());
+
+  HBHEChannelInfo_mahi_count(8,std::vector<float>());
+  HBHEChannelInfo_mahi_inputTS(8,std::vector<float>());
+  HBHEChannelInfo_mahi_inputTDC(8,std::vector<int>());
+  HBHEChannelInfo_mahi_itPulse(8,std::vector<float>());
+  HBHEChannelInfo_mahi_inNoiseADC(8,std::vector<float>());
+  HBHEChannelInfo_mahi_inNoiseDC(8,std::vector<float>());
+  HBHEChannelInfo_mahi_inNoisePhoto(8,std::vector<float>());
+  HBHEChannelInfo_mahi_inPedestal(8,std::vector<float>());
+  HBHEChannelInfo_mahi_totalUCNoise(8,std::vector<float>());
+
+  HBHEChannelInfo_mahi_ootPulse(8,std::vector<std::vector<float>>(7,std::vector<float>()));
+
+  //
+  // https://cmssdt.cern.ch/lxr/source/RecoLocalCalo/HcalRecAlgos/test/MahiDebugger.cc
+  //
+  edm::EventBase const& eventbase = iEvent;
+
+  if (saveMAHIInfo_) {
+    mahi_hcalTimeSlewDelay = &iSetup.getData(tokDelay_);
+  }
+
+  edm::Handle<HBHEChannelInfoCollection> hbheChannelInfo;
+  iEvent.getByToken(hbheChannelInfoToken_, hbheChannelInfo);
+
+  int nHBHEChannelInfo=0;
+
+  for (HBHEChannelInfoCollection::const_iterator iter = hbheChannelInfo->begin(); iter != hbheChannelInfo->end(); iter++) {
+    const HBHEChannelInfo& hci(*iter);
+    const HcalDetId detid = hci.id();
+
+    //
+    // Skip channels where we dont save the HBHE rechits. If we do save the rechit, get the index
+    //
+    std::size_t index = -1;
+    auto it = std::find(PFRecHitHBHE_detId.begin(), PFRecHitHBHE_detId.end(), detid);
+    if (it != PFRecHitHBHE_detId.end()) {
+      index = std::distance(PFRecHitHBHE_detId.begin(), it);
+    } else {
+      continue;
+    }
+
+    int ieta = detid.ieta();
+    int iphi = detid.iphi();
+    int depth = detid.depth();
+
+    HBHEChannelInfo_ieta.push_back(ieta);
+    HBHEChannelInfo_iphi.push_back(iphi);
+    HBHEChannelInfo_depth.push_back(depth);
+
+    HBHEChannelInfo_fcByPE.push_back(hci.fcByPE());
+    HBHEChannelInfo_lambda.push_back(hci.lambda());
+    HBHEChannelInfo_noisecorr.push_back(hci.noisecorr());
+
+    for (int iTS=0; iTS < 8; iTS++){
+      HBHEChannelInfo_tsRawCharge[iTS].push_back(hci.tsRawCharge(iTS));
+      HBHEChannelInfo_tsPedestal[iTS].push_back(hci.tsPedestal(iTS));
+      HBHEChannelInfo_tsDFcPerADC[iTS].push_back(hci.tsDFcPerADC(iTS));
+    }
+
+    if (saveMAHIInfo_){
+      HcalPulseShapes theHcalPulseShapes_;
+      //for pulse shapes
+      std::unique_ptr<FitterFuncs::PulseShapeFunctor> psfPtr_;
+      std::unique_ptr<ROOT::Math::Functor> pfunctor_;
+
+      const MahiFit* mahi = mahi_.get();
+      mahi_->setPulseShapeTemplate(hci.recoShape(), theHcalPulseShapes_, hci.hasTimeInfo(), mahi_hcalTimeSlewDelay, hci.nSamples(), hci.tsGain(0));
+
+      MahiDebugInfo mdi;
+      // initialize energies so that the values in the previous iteration are not stored
+      mdi.mahiEnergy = 0;
+      for (unsigned int ioot = 0; ioot < 7; ioot++){
+        mdi.ootEnergy[ioot] = 0;
+      }
+      mahi->phase1Debug(hci, mdi);
+
+      HBHEChannelInfo_mahi_nSamples.push_back(mdi.nSamples);
+      HBHEChannelInfo_mahi_soi.push_back(mdi.soi);
+
+      HBHEChannelInfo_mahi_inTimeConst.push_back(mdi.inTimeConst);
+      HBHEChannelInfo_mahi_inDarkCurrent.push_back(mdi.inDarkCurrent);
+      HBHEChannelInfo_mahi_inPedAvg.push_back(mdi.inPedAvg);
+      HBHEChannelInfo_mahi_inGain.push_back(mdi.inGain);
+
+      HBHEChannelInfo_mahi_use8.push_back(mdi.use3);
+      HBHEChannelInfo_mahi_chiSq.push_back(mdi.chiSq);
+      HBHEChannelInfo_mahi_arrivalTime.push_back(mdi.arrivalTime);
+      HBHEChannelInfo_mahi_mahiEnergy.push_back(mdi.mahiEnergy);
+
+      HBHEChannelInfo_mahi_ootEnergy0.push_back(mdi.ootEnergy[0]);
+      HBHEChannelInfo_mahi_ootEnergy1.push_back(mdi.ootEnergy[1]);
+      HBHEChannelInfo_mahi_ootEnergy2.push_back(mdi.ootEnergy[2]);
+      HBHEChannelInfo_mahi_ootEnergy3.push_back(mdi.ootEnergy[3]);
+      HBHEChannelInfo_mahi_ootEnergy4.push_back(mdi.ootEnergy[4]);
+      HBHEChannelInfo_mahi_ootEnergy5.push_back(mdi.ootEnergy[5]);
+      HBHEChannelInfo_mahi_ootEnergy6.push_back(mdi.ootEnergy[6]);
+
+      HBHEChannelInfo_mahi_pedEnergy.push_back(mdi.pedEnergy);
+
+      for (int iTS=0; iTS < 8; iTS++){
+        HBHEChannelInfo_mahi_count[iTS].push_back(mdi.count[iTS]);
+        HBHEChannelInfo_mahi_inputTS[iTS].push_back(mdi.inputTS[iTS]);
+        HBHEChannelInfo_mahi_inputTDC[iTS].push_back(mdi.inputTDC[iTS]);
+        HBHEChannelInfo_mahi_itPulse[iTS].push_back(mdi.itPulse[iTS]);
+        HBHEChannelInfo_mahi_inNoiseADC[iTS].push_back(mdi.inNoiseADC[iTS]);
+        HBHEChannelInfo_mahi_inNoiseDC[iTS].push_back(mdi.inNoiseDC[iTS]);
+        HBHEChannelInfo_mahi_inNoisePhoto[iTS].push_back(mdi.inNoisePhoto[iTS]);
+        HBHEChannelInfo_mahi_inPedestal[iTS].push_back(mdi.inPedestal[iTS]);
+        HBHEChannelInfo_mahi_totalUCNoise[iTS].push_back(mdi.totalUCNoise[iTS]);
+        for (int iOOT=0; iOOT < 7; iOOT++){
+          HBHEChannelInfo_mahi_ootPulse[iTS][iOOT].push_back(mdi.ootPulse[iOOT][iTS]);
+        }
+      }
+    }
+    PFRecHitHBHE_HBHEChannelInfoIdx[index] = nHBHEChannelInfo;//The index of this HBHEChannelInfo
+    nHBHEChannelInfo++;
+  }
+  */
+
+  //==========================================
+  //
   // PFRecHits HCAL:HF
   //
   //==========================================
-  edm::Handle<std::vector<reco::PFRecHit>> pfRecHitsHFHandle;
-  iEvent.getByToken(pfRecHitsHFToken_, pfRecHitsHFHandle);
+  // edm::Handle<std::vector<reco::PFRecHit>> pfRecHitsHFHandle;
+  // iEvent.getByToken(pfRecHitsHFToken_, pfRecHitsHFHandle);
 
-  auto pfRecHitsHF = pfRecHitsHFHandle.product();
-  size_t n_pfRecHitsHF = pfRecHitsHF->size();
+  // auto pfRecHitsHF = pfRecHitsHFHandle.product();
+  // size_t n_pfRecHitsHF = pfRecHitsHF->size();
 
   // nPFRecHitHF=0;
   // for (size_t idx = 0; idx < n_pfRecHitsHF; idx++){
@@ -1612,6 +1928,12 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
       auto cellGeometry = geometry->getSubdetectorGeometry(theECalEBDetId)->getGeometry(theECalEBDetId);
       double eta = cellGeometry->getPosition().eta();
       double phi = cellGeometry->getPosition().phi();
+
+      if (saveOnlyNearbyPFRecHits_){
+        float dR2 = reco::deltaR2(genPart.eta(), genPart.phi(), eta, phi);
+        if (dR2 > (dRNearbyPFRecHits_*dRNearbyPFRecHits_)) continue;
+      }
+
       PFRecHitEB_energy.push_back(pfrechit.energy());
       PFRecHitEB_ieta.push_back(theECalEBDetId.ieta());
       PFRecHitEB_iphi.push_back(theECalEBDetId.iphi());
@@ -1635,6 +1957,12 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
       auto cellGeometry = geometry->getSubdetectorGeometry(theECalEEDetId)->getGeometry(theECalEEDetId);
       double eta = cellGeometry->getPosition().eta();
       double phi = cellGeometry->getPosition().phi();
+
+      if (saveOnlyNearbyPFRecHits_){
+        float dR2 = reco::deltaR2(genPart.eta(), genPart.phi(), eta, phi);
+        if (dR2 > (dRNearbyPFRecHits_*dRNearbyPFRecHits_)) continue;
+      }
+
       PFRecHitEE_energy.push_back(pfrechit.energy());
       PFRecHitEE_ix.push_back(theECalEEDetId.ix());
       PFRecHitEE_iy.push_back(theECalEEDetId.iy());
@@ -1648,6 +1976,60 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
       }
     }
   }
+
+  //==========================================
+  //
+  // G4
+  //
+  //==========================================
+
+  //https://twiki.cern.ch/twiki/bin/view/CMSPublic/SWGuideMCTruth
+  // edm::Handle<SimVertexContainer> simVertices;
+  // iEvent.getByToken(input_simvertex_token_, simVertices);
+  // const edm::SimVertexContainer* mSimVertexCollection = &*simVertices;
+  // std::cout << "mSimVertexCollection->size() = " << mSimVertexCollection->size() << std::endl;
+
+  // const SimVertex* vertex = &((*getSimVertexCollection())[track->vertIndex()]);
+
+  // edm::Handle<SimTrackContainer> simTracks;
+  // iEvent.getByToken(input_simtrack_token_, simTracks);
+  // const edm::SimTrackContainer*  mSimTrackCollection = &*simTracks;
+  // std::cout << "mSimTrackCollection->size() = " << mSimTrackCollection->size() << std::endl;
+  // for (unsigned i = 0; i < mSimTrackCollection->size(); ++i) {
+  //   auto track = mSimTrackCollection->at(i);
+  //   std::cout << i << " / " << mSimTrackCollection->size() << " | " << track.vertIndex();
+  //   if (track.vertIndex() >= 0 && track.vertIndex() < (int) mSimVertexCollection->size()){
+  //     std::cout << " | " << mSimVertexCollection->at(track.vertIndex()) << " | procType = " << mSimVertexCollection->at(track.vertIndex()).processType() << std::endl;
+  //   }else{      std::cout << " | No Vertex"  << std::endl;
+  //   }
+  // }
+
+
+  edm::Handle<edm::PCaloHitContainer> g4SimHitsPCaloHitsHCALHandle;
+  iEvent.getByToken(g4SimHitsPCaloHitsHCALToken_, g4SimHitsPCaloHitsHCALHandle);
+  auto g4SimHitsPCaloHitsHCAL = g4SimHitsPCaloHitsHCALHandle.product();
+  size_t n_g4SimHitsPCaloHitsHCAL = g4SimHitsPCaloHitsHCAL->size();
+
+  // for (size_t idx = 0; idx < n_g4SimHitsPCaloHitsHCAL; idx++){
+  //   const PCaloHit& caloHit = g4SimHitsPCaloHitsHCAL->at(idx);
+  //   DetId newid = HcalHitRelabeller::relabel(caloHit.id(), hcaloConst);
+  //   HcalDetId theHcalDetId(newid);
+  //   for (unsigned i = 0; i < mSimTrackCollection->size(); ++i) {
+  //     auto track = mSimTrackCollection->at(i);
+  //     if ((int) track.trackId() == caloHit.geantTrackId()){
+  //       if (track.vertIndex() >= 0 && track.vertIndex() < (int) mSimVertexCollection->size()){
+  //         std::cout << " | " << mSimVertexCollection->at(track.vertIndex()) << " | procType = " << mSimVertexCollection->at(track.vertIndex()).processType() ;
+  //         std::cout << ", caloHit.energyEM()  = " << caloHit.energyEM();
+  //         std::cout << ", caloHit.energyHad() = " << caloHit.energyHad();
+  //         std::cout << ", ieta = " << theHcalDetId.ieta();
+  //         std::cout << ", iphi = " << theHcalDetId.iphi() << std::endl;
+  //       }else{
+  //         std::cout << " | No Vertex"  << std::endl;
+  //       }
+  //     }
+  //   }
+  // }
+
   //==========================================
   //
   // PCaloHit: HCAL
@@ -1659,10 +2041,12 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
     auto hcalCond = &iSetup.getData(hcalDBToken_);
     theParameterMap->setDbService(hcalCond);
 
-    edm::Handle<edm::PCaloHitContainer> g4SimHitsPCaloHitsHCALHandle;
-    iEvent.getByToken(g4SimHitsPCaloHitsHCALToken_, g4SimHitsPCaloHitsHCALHandle);
-    auto g4SimHitsPCaloHitsHCAL = g4SimHitsPCaloHitsHCALHandle.product();
-    size_t n_g4SimHitsPCaloHitsHCAL = g4SimHitsPCaloHitsHCAL->size();
+    //
+    //TEMP
+    // edm::Handle<edm::PCaloHitContainer> g4SimHitsPCaloHitsHCALHandle;
+    // iEvent.getByToken(g4SimHitsPCaloHitsHCALToken_, g4SimHitsPCaloHitsHCALHandle);
+    // auto g4SimHitsPCaloHitsHCAL = g4SimHitsPCaloHitsHCALHandle.product();
+    // size_t n_g4SimHitsPCaloHitsHCAL = g4SimHitsPCaloHitsHCAL->size();
 
     nG4SimHitPCaloHitHBHE=0;
     // nG4SimHitPCaloHitHF=0;
@@ -1681,6 +2065,9 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
         phi = cellGeometryHE->getPosition(theHcalDetId).phi();
       }
       //
+
+      // std::cout << caloHit.geantTrackId() << " / mSimTrackCollection->size() = " << mSimTrackCollection->size() << std::endl;
+
       // TODO: Can try these examples to retrieve more parameters used for HCAL response simulation
       //
       // if (newid.subdetId() == HcalSubdetector::HcalBarrel || newid.subdetId() == HcalSubdetector::HcalEndcap){
@@ -1712,6 +2099,22 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
           map_simHitInfoHBHE[caloHit.id()].energyEM_25ns  = 0.f;
           map_simHitInfoHBHE[caloHit.id()].energyHAD_25ns = 0.f;
           map_simHitInfoHBHE[caloHit.id()].nCaloHits_25ns = 0;
+          map_simHitInfoHBHE[caloHit.id()].energy_50ns    = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].energyEM_50ns  = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].energyHAD_50ns = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].nCaloHits_50ns = 0;
+          map_simHitInfoHBHE[caloHit.id()].energy_75ns    = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].energyEM_75ns  = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].energyHAD_75ns = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].nCaloHits_75ns = 0;
+          map_simHitInfoHBHE[caloHit.id()].energy_100ns    = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].energyEM_100ns  = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].energyHAD_100ns = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].nCaloHits_100ns = 0;
+          map_simHitInfoHBHE[caloHit.id()].energy_200ns    = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].energyEM_200ns  = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].energyHAD_200ns = 0.f;
+          map_simHitInfoHBHE[caloHit.id()].nCaloHits_200ns = 0;
         }
 
         map_simHitInfoHBHE[caloHit.id()].energy    += caloHit.energy();
@@ -1723,6 +2126,30 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
           map_simHitInfoHBHE[caloHit.id()].energyEM_25ns  += caloHit.energyEM();
           map_simHitInfoHBHE[caloHit.id()].energyHAD_25ns += caloHit.energyHad();
           map_simHitInfoHBHE[caloHit.id()].nCaloHits_25ns += 1;
+        }
+        if (caloHit.time() <= 50){
+          map_simHitInfoHBHE[caloHit.id()].energy_50ns    += caloHit.energy();
+          map_simHitInfoHBHE[caloHit.id()].energyEM_50ns  += caloHit.energyEM();
+          map_simHitInfoHBHE[caloHit.id()].energyHAD_50ns += caloHit.energyHad();
+          map_simHitInfoHBHE[caloHit.id()].nCaloHits_50ns += 1;
+        }
+        if (caloHit.time() <= 75){
+          map_simHitInfoHBHE[caloHit.id()].energy_75ns    += caloHit.energy();
+          map_simHitInfoHBHE[caloHit.id()].energyEM_75ns  += caloHit.energyEM();
+          map_simHitInfoHBHE[caloHit.id()].energyHAD_75ns += caloHit.energyHad();
+          map_simHitInfoHBHE[caloHit.id()].nCaloHits_75ns += 1;
+        }
+        if (caloHit.time() <= 100){
+          map_simHitInfoHBHE[caloHit.id()].energy_100ns    += caloHit.energy();
+          map_simHitInfoHBHE[caloHit.id()].energyEM_100ns  += caloHit.energyEM();
+          map_simHitInfoHBHE[caloHit.id()].energyHAD_100ns += caloHit.energyHad();
+          map_simHitInfoHBHE[caloHit.id()].nCaloHits_100ns += 1;
+        }
+         if (caloHit.time() <= 200){
+          map_simHitInfoHBHE[caloHit.id()].energy_200ns    += caloHit.energy();
+          map_simHitInfoHBHE[caloHit.id()].energyEM_200ns  += caloHit.energyEM();
+          map_simHitInfoHBHE[caloHit.id()].energyHAD_200ns += caloHit.energyHad();
+          map_simHitInfoHBHE[caloHit.id()].nCaloHits_200ns += 1;
         }
 
         if(saveSimCaloHitHBHE_){
@@ -1759,12 +2186,18 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
         }
         const HcalSimParameters& pars = dynamic_cast<const HcalSimParameters&>(theParameterMap->simParameters(theHcalDetId));
         float samplingFactor = pars.samplingFactor(theHcalDetId);
+        float fCtoGeV = pars.fCtoGeV(theHcalDetId);
+        float photoelectronsToAnalog = pars.photoelectronsToAnalog(theHcalDetId);
+        float simHitToPhotoelectrons = pars.simHitToPhotoelectrons(theHcalDetId);
 
         SimHitHBHE_energy.push_back((it->second).energy);
         SimHitHBHE_energyEM.push_back((it->second).energyEM);
         SimHitHBHE_energyHAD.push_back((it->second).energyHAD);
         SimHitHBHE_nCaloHits.push_back((it->second).nCaloHits);
         SimHitHBHE_samplingFactor.push_back(samplingFactor);
+        SimHitHBHE_fCtoGeV.push_back(fCtoGeV);
+        SimHitHBHE_photoelectronsToAnalog.push_back(photoelectronsToAnalog);
+        SimHitHBHE_simHitToPhotoelectrons.push_back(simHitToPhotoelectrons);
         SimHitHBHE_ieta.push_back(theHcalDetId.ieta());
         SimHitHBHE_iphi.push_back(theHcalDetId.iphi());
         SimHitHBHE_depth.push_back(theHcalDetId.depth());
@@ -1775,6 +2208,18 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
         SimHitHBHE_energy_25ns.push_back((it->second).energy_25ns);
         SimHitHBHE_energyEM_25ns.push_back((it->second).energyEM_25ns);
         SimHitHBHE_energyHAD_25ns.push_back((it->second).energyHAD_25ns);
+        SimHitHBHE_energy_50ns.push_back((it->second).energy_50ns);
+        SimHitHBHE_energyEM_50ns.push_back((it->second).energyEM_50ns);
+        SimHitHBHE_energyHAD_50ns.push_back((it->second).energyHAD_50ns);
+        SimHitHBHE_energy_75ns.push_back((it->second).energy_75ns);
+        SimHitHBHE_energyEM_75ns.push_back((it->second).energyEM_75ns);
+        SimHitHBHE_energyHAD_75ns.push_back((it->second).energyHAD_75ns);
+        SimHitHBHE_energy_100ns.push_back((it->second).energy_100ns);
+        SimHitHBHE_energyEM_100ns.push_back((it->second).energyEM_100ns);
+        SimHitHBHE_energyHAD_100ns.push_back((it->second).energyHAD_100ns);
+        SimHitHBHE_energy_200ns.push_back((it->second).energy_200ns);
+        SimHitHBHE_energyEM_200ns.push_back((it->second).energyEM_200ns);
+        SimHitHBHE_energyHAD_200ns.push_back((it->second).energyHAD_200ns);
         nSimHitHBHE++;
       }
     }
@@ -1879,7 +2324,7 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
 
       auto it = map_simHitInfoEE.find(caloHit.id());
       // DetId not in map yet, so lets set SimHitInfo for this DetId.
-      if (it == map_simHitInfoEE.end()) { 
+      if (it == map_simHitInfoEE.end()) {
         map_simHitInfoEE[caloHit.id()] = SimHitInfo();
         map_simHitInfoEE[caloHit.id()].energy    = 0.f;
         map_simHitInfoEE[caloHit.id()].energyEM  = 0.f;
@@ -2158,5 +2603,22 @@ void ParticleFlowAnalysisNtuplizer::analyze(const Event& iEvent, const EventSetu
 
   tree->Fill();
 }
+// const SimTrack* ParticleFlowAnalysisNtuplizer::getSimTrack(unsigned fSimTrackId) {
+//   for (unsigned i = 0; i < getSimTrackCollection()->size(); ++i) {
+//     if ((*getSimTrackCollection())[i].trackId() == fSimTrackId)
+//       return &(*getSimTrackCollection())[i];
+//   }
+//   return nullptr;
+// }
+
+// // https://cmssdt.cern.ch/lxr/source/RecoJets/JetProducers/src/JetMatchingTools.cc#0230
+// // https://cmssdt.cern.ch/lxr/source/RecoJets/JetProducers/interface/JetMatchingTools.h
+// const SimTrack* JetMatchingTools::getTrack(unsigned fSimTrackId) {
+//   for (unsigned i = 0; i < getSimTrackCollection()->size(); ++i) {
+//     if ((*getSimTrackCollection())[i].trackId() == fSimTrackId)
+//       return &(*getSimTrackCollection())[i];
+//   }
+//   return nullptr;
+// }
 
 DEFINE_FWK_MODULE(ParticleFlowAnalysisNtuplizer);

@@ -43,6 +43,8 @@
 #include "SimDataFormats/GeneratorProducts/interface/HepMCProduct.h"
 #include "SimDataFormats/CaloHit/interface/PCaloHit.h"
 #include "SimDataFormats/CaloHit/interface/PCaloHitContainer.h"
+#include "SimDataFormats/Track/interface/SimTrackContainer.h"
+#include "SimDataFormats/Vertex/interface/SimVertexContainer.h"
 
 #include "SimCalorimetry/CaloSimAlgos/interface/CaloVSimParameterMap.h"
 #include "SimCalorimetry/HcalSimAlgos/interface/HcalSimParameterMap.h"
@@ -73,6 +75,11 @@
 #include "MagneticField/Engine/interface/MagneticField.h"
 #include "MagneticField/Records/interface/IdealMagneticFieldRecord.h"
 
+#include "RecoLocalCalo/HcalRecAlgos/interface/PulseShapeFitOOTPileupCorrection.h"
+#include "RecoLocalCalo/HcalRecAlgos/interface/HcalDeterministicFit.h"
+#include "RecoLocalCalo/HcalRecAlgos/interface/MahiFit.h"
+#include "CalibCalorimetry/HcalAlgos/interface/HcalTimeSlew.h"
+
 #include <TFile.h>
 #include <TTree.h>
 #include <TVector3.h>
@@ -99,6 +106,9 @@ class ParticleFlowAnalysisNtuplizer : public edm::one::EDAnalyzer<edm::one::Watc
 
   edm::EDGetTokenT<reco::PFCandidateCollection> tokenPFCandidates_;
 
+  edm::EDGetTokenT<edm::SimTrackContainer> input_simtrack_token_;
+  edm::EDGetTokenT<edm::SimVertexContainer> input_simvertex_token_;
+
   edm::EDGetTokenT<edm::ValueMap<bool>> chargedHadronIsolationToken_;
 
   edm::EDGetTokenT<std::vector<reco::PFRecHit>>    pfRecHitsECALToken_;
@@ -115,6 +125,8 @@ class ParticleFlowAnalysisNtuplizer : public edm::one::EDAnalyzer<edm::one::Watc
   edm::EDGetTokenT<edm::PCaloHitContainer>    g4SimHitsPCaloHitsPSToken_;
   edm::EDGetTokenT<edm::PCaloHitContainer>    g4SimHitsPCaloHitsHCALToken_;
   // edm::EDGetTokenT<PCaloHitContainer>    g4SimPCaloHitsHFToken_;
+
+  edm::EDGetTokenT<HBHEChannelInfoCollection> hbheChannelInfoToken_;
 
   /// Min number of pixel hits for charged hadrons
   int nPixMin_;
@@ -134,13 +146,20 @@ class ParticleFlowAnalysisNtuplizer : public edm::one::EDAnalyzer<edm::one::Watc
   bool saveSimHitEB_;
   bool saveSimHitEE_;
 
+  bool saveAllPFCands_;
+
   bool savePFClustersECAL_;
   bool savePFClustersPS_;
   bool savePFClustersHCAL_;
 
+  bool saveOnlyNearbyPFRecHits_;
+  double dRNearbyPFRecHits_;
+
   double dRMaxGenPartToPFCandChgHad_;
   double dRMaxGenPartToPFCandNeuHad_;
   double dRMaxGenPartToPFCandPhoton_;
+
+  bool saveMAHIInfo_;
 
   edm::RunNumber_t run;
   edm::EventNumber_t evt;
@@ -218,11 +237,25 @@ class ParticleFlowAnalysisNtuplizer : public edm::one::EDAnalyzer<edm::one::Watc
   float genPart_extrapolated_pointHCAL_eta;
   float genPart_extrapolated_pointHCAL_phi;
 
+  std::vector<int> genPart_CloseByPFCand_OriginalIdx;
+  std::vector<int> genPart_CloseByPFCand_ChgHad_OriginalIdx;
+  std::vector<int> genPart_CloseByPFCand_NeuHad_OriginalIdx;
+  std::vector<int> genPart_CloseByPFCand_Photon_OriginalIdx;
+
   float genVertex_x;
   float genVertex_y;
   float genVertex_z;
 
-  int   nPFCand;
+  int nAllPFCand;
+  std::vector<float> AllPFCand_pt;
+  std::vector<float> AllPFCand_eta;
+  std::vector<float> AllPFCand_phi;
+  std::vector<float> AllPFCand_mass;
+  std::vector<float> AllPFCand_energy;
+  std::vector<int>   AllPFCand_pdgId;
+  std::vector<unsigned> AllPFCand_birthId;//Special
+
+  int nPFCand;
   std::vector<float> PFCand_pt;
   std::vector<float> PFCand_eta;
   std::vector<float> PFCand_phi;
@@ -338,6 +371,8 @@ class ParticleFlowAnalysisNtuplizer : public edm::one::EDAnalyzer<edm::one::Watc
   std::vector<float> PFRecHitHBHE_cutThreshold;
   std::vector<float> PFRecHitHBHE_hcalRespCorr;
   std::vector<unsigned int>   PFRecHitHBHE_detId;
+  std::vector<int>  PFRecHitHBHE_HBHEChannelInfoIdx;
+
   //
   int nPFRecHitHF;
   std::vector<float> PFRecHitHF_energy;
@@ -421,6 +456,9 @@ class ParticleFlowAnalysisNtuplizer : public edm::one::EDAnalyzer<edm::one::Watc
   std::vector<float> SimHitHBHE_energyEM;
   std::vector<float> SimHitHBHE_energyHAD;
   std::vector<float> SimHitHBHE_samplingFactor;
+  std::vector<float> SimHitHBHE_fCtoGeV;
+  std::vector<float> SimHitHBHE_photoelectronsToAnalog;
+  std::vector<float> SimHitHBHE_simHitToPhotoelectrons;
   std::vector<int>   SimHitHBHE_nCaloHits;
   std::vector<int>   SimHitHBHE_ieta;
   std::vector<int>   SimHitHBHE_iphi;
@@ -433,6 +471,22 @@ class ParticleFlowAnalysisNtuplizer : public edm::one::EDAnalyzer<edm::one::Watc
   std::vector<float> SimHitHBHE_energyEM_25ns;
   std::vector<float> SimHitHBHE_energyHAD_25ns;
   std::vector<int>   SimHitHBHE_nCaloHits_25ns;
+  std::vector<float> SimHitHBHE_energy_50ns;
+  std::vector<float> SimHitHBHE_energyEM_50ns;
+  std::vector<float> SimHitHBHE_energyHAD_50ns;
+  std::vector<int>   SimHitHBHE_nCaloHits_50ns;
+  std::vector<float> SimHitHBHE_energy_75ns;
+  std::vector<float> SimHitHBHE_energyEM_75ns;
+  std::vector<float> SimHitHBHE_energyHAD_75ns;
+  std::vector<int>   SimHitHBHE_nCaloHits_75ns;
+  std::vector<float> SimHitHBHE_energy_100ns;
+  std::vector<float> SimHitHBHE_energyEM_100ns;
+  std::vector<float> SimHitHBHE_energyHAD_100ns;
+  std::vector<int>   SimHitHBHE_nCaloHits_100ns;
+  std::vector<float> SimHitHBHE_energy_200ns;
+  std::vector<float> SimHitHBHE_energyEM_200ns;
+  std::vector<float> SimHitHBHE_energyHAD_200ns;
+  std::vector<int>   SimHitHBHE_nCaloHits_200ns;
 
   //
   //
@@ -505,6 +559,82 @@ class ParticleFlowAnalysisNtuplizer : public edm::one::EDAnalyzer<edm::one::Watc
 
   //https://cmssdt.cern.ch/lxr/source/SimCalorimetry/HcalSimAlgos/test/CaloSamplesAnalyzer.cc#0086
   HcalSimParameterMap* theParameterMap;
+
+  //
+  //
+  //
+  /*
+  int nHBHEChannelInfo;
+
+  std::vector<int>   HBHEChannelInfo_ieta;
+  std::vector<int>   HBHEChannelInfo_iphi;
+  std::vector<int>   HBHEChannelInfo_depth;
+
+  std::vector<float> HBHEChannelInfo_fcByPE;
+  std::vector<float> HBHEChannelInfo_lambda;
+  std::vector<float> HBHEChannelInfo_noisecorr;
+
+  std::vector<std::vector<float>>  HBHEChannelInfo_tsRawCharge;
+  std::vector<std::vector<float>>  HBHEChannelInfo_tsPedestal;
+  std::vector<std::vector<float>>  HBHEChannelInfo_tsDFcPerADC;
+
+  std::vector<int>   HBHEChannelInfo_mahi_nSamples;
+  std::vector<int>   HBHEChannelInfo_mahi_soi;
+  std::vector<float> HBHEChannelInfo_mahi_inTimeConst;
+  std::vector<float> HBHEChannelInfo_mahi_inDarkCurrent;
+  std::vector<float> HBHEChannelInfo_mahi_inPedAvg;
+  std::vector<float> HBHEChannelInfo_mahi_inGain;
+  std::vector<bool>  HBHEChannelInfo_mahi_use8;
+  std::vector<float> HBHEChannelInfo_mahi_chiSq;
+  std::vector<float> HBHEChannelInfo_mahi_arrivalTime;
+  std::vector<float> HBHEChannelInfo_mahi_mahiEnergy;
+  std::vector<float> HBHEChannelInfo_mahi_ootEnergy0;
+  std::vector<float> HBHEChannelInfo_mahi_ootEnergy1;
+  std::vector<float> HBHEChannelInfo_mahi_ootEnergy2;
+  std::vector<float> HBHEChannelInfo_mahi_ootEnergy3;
+  std::vector<float> HBHEChannelInfo_mahi_ootEnergy4;
+  std::vector<float> HBHEChannelInfo_mahi_ootEnergy5;
+  std::vector<float> HBHEChannelInfo_mahi_ootEnergy6;
+  std::vector<float> HBHEChannelInfo_mahi_pedEnergy;
+
+  std::vector<std::vector<float>> HBHEChannelInfo_mahi_count;
+  std::vector<std::vector<float>> HBHEChannelInfo_mahi_inputTS;
+  std::vector<std::vector<int  >> HBHEChannelInfo_mahi_inputTDC;
+  std::vector<std::vector<float>> HBHEChannelInfo_mahi_itPulse;
+  std::vector<std::vector<float>> HBHEChannelInfo_mahi_inNoiseADC;
+  std::vector<std::vector<float>> HBHEChannelInfo_mahi_inNoiseDC;
+  std::vector<std::vector<float>> HBHEChannelInfo_mahi_inNoisePhoto;
+  std::vector<std::vector<float>> HBHEChannelInfo_mahi_inPedestal;
+  std::vector<std::vector<float>> HBHEChannelInfo_mahi_totalUCNoise;
+
+  std::vector<std::vector<std::vector<float>>> HBHEChannelInfo_mahi_ootPulse;
+
+  //
+  // MAHIrelated
+  // https://cmssdt.cern.ch/lxr/source/RecoLocalCalo/HcalRecAlgos/test/MahiDebugger.cc
+  //
+  bool  mahi_dynamicPed_;
+  float mahi_ts4Thresh_;
+  float mahi_chiSqSwitch_;
+  bool  mahi_applyTimeSlew_;
+  HcalTimeSlew::BiasSetting mahi_slewFlavor_;
+  double mahi_tsDelay1GeV_ = 0;
+  bool mahi_calculateArrivalTime_;
+  int mahi_timeAlgo_;
+  float mahi_thEnergeticPulses_;
+  float mahi_meanTime_;
+  float mahi_timeSigmaHPD_;
+  float mahi_timeSigmaSiPM_;
+  std::vector<int> mahi_activeBXs_;
+  int mahi_nMaxItersMin_;
+  int mahi_nMaxItersNNLS_;
+  float mahi_deltaChiSqThresh_;
+  float mahi_nnlsThresh_;
+
+  std::unique_ptr<MahiFit> mahi_;
+
+  const HcalTimeSlew* mahi_hcalTimeSlewDelay;
+  */
 
   bool   verbose_;
 };
